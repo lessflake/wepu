@@ -177,7 +177,13 @@ fn Content() -> impl IntoView {
         Some(page) => page,
         None => {
             // HACK: trailing slash makes this route match
-            (use_navigate())("/", Default::default());
+            (use_navigate())(
+                "/",
+                NavigateOptions {
+                    replace: true,
+                    ..Default::default()
+                },
+            );
             0
         }
     };
