@@ -1,0 +1,20 @@
+[package]
+name = "wepu"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.release]
+panic = 'abort'
+lto = 'fat'
+codegen-units = 1
+opt-level = 3
+
+[dependencies]
+console_error_panic_hook = "0.1.7"
+leptos = { version = "0.6.6", default-features = false, features = ["csr"] }
+leptos_router = { version = "0.6.6", default-features = false, features = ["csr"] }
+lepu = { path = "../lepu" }
+wasm-bindgen-futures = "0.4.41"
+web-sys = { version = "0.3.68", features = ["Blob", "File", "FileList", "FileReader"] }
