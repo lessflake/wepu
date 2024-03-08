@@ -34,18 +34,26 @@ fn App() -> impl IntoView {
     provide_context(set_page);
     provide_context(res);
 
+    let main_view = move || {
+        let book_view = move || matches!(res.get(), Some(Some(_)));
+        let upload_view = move || {
+            view! { <Upload file=set_source /> }
+        };
+        view! {
+            <Show when=book_view fallback=upload_view>
+                <Outlet/>
+            </Show>
+        }
+    };
+
     view! {
-        <Router>
+        <Router base="/wepu">
         <main>
             <div class="flex flex-col max-w-screen-sm xl:max-w-screen-md min-h-screen mx-auto space-y-10 py-10 text-2xl">
-                <Routes>
-                    <Route path="/" view=move || { view! {
-                        <Show when=move || {matches!(res.get(), Some(Some(_)))} fallback=move || {view! { <Upload file=set_source /> }}>
-                            <Outlet/>
-                        </Show>
-                    }}>
-                        <Route path="/" view=Navigation />
-                        <Route path="/:idx" view=Content />
+                <Routes base="/wepu".to_string()>
+                    <Route path="/" view=main_view>
+                        <Route path="" view=Navigation />
+                        <Route path=":idx" view=Content />
                     </Route>
                 </Routes>
             </div>
@@ -85,9 +93,10 @@ fn Navigation() -> impl IntoView {
         let inner = entries
             .map(|e: &Chapter| {
                 let sublist = e.has_children().then(|| make_list(e.children()));
-                let idx = e.index_in_spine();
+                let idx = format!("{}", e.index_in_spine());
+                let name = e.name().to_owned();
                 view! {
-                    <li><a href={format!("/{}", idx)} class="text-sky-300">{e.name().to_owned()}</a>
+                    <li><A href=idx class="text-sky-300">{name}</A>
                         {sublist}
                     </li>
                 }
@@ -116,19 +125,17 @@ fn Navigation() -> impl IntoView {
     }
 }
 
-fn convert<'a>(text: &Text<'a>) -> leptos::View {
+fn convert(text: &Text<'_>) -> leptos::View {
     let mut children = Vec::new();
     for (slice, style) in text.style_chunks() {
         let mut views = Vec::new();
-        let mut i = 0;
-        for chunk in slice.split('\n') {
+        for (i, chunk) in slice.split('\n').enumerate() {
             if i > 0 {
                 views.push(html::br().into_view());
             }
             if !chunk.is_empty() {
                 views.push(chunk.to_owned().into_view());
             }
-            i += 1;
         }
         let mut view = views.collect_view();
         if style.contains(Style::ITALIC) {
@@ -166,7 +173,14 @@ fn Content() -> impl IntoView {
     let params = use_params::<ChapterParams>();
     let set_page = expect_context::<WriteSignal<usize>>();
     let book = expect_context::<BookResource>();
-    let page = move || params.with(|p| p.as_ref().map(|p| p.idx).ok().flatten().unwrap());
+    let page = move || match params.with(|p| p.as_ref().map(|p| p.idx).ok().flatten()) {
+        Some(page) => page,
+        None => {
+            // HACK: trailing slash makes this route match
+            (use_navigate())("/", Default::default());
+            0
+        }
+    };
 
     create_effect(move |_| set_page.set(page()));
 
