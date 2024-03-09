@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.release]
-panic = 'abort'
-lto = 'fat'
+panic = "abort"
+lto = "fat"
 codegen-units = 1
-opt-level = 3
+opt-level = 'z'
 
 [dependencies]
 console_error_panic_hook = "0.1.7"

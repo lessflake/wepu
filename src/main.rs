@@ -23,7 +23,7 @@ fn App() -> impl IntoView {
             let future = wasm_bindgen_futures::JsFuture::from(promise);
             let res = future.await.ok()?;
             let buf = Uint8Array::new(&res).to_vec();
-            let epub = Epub::from_vec(buf).ok()?;
+            let epub = Epub::new(buf).ok()?;
             Some(Rc::new(RefCell::new(epub)))
         },
     );
