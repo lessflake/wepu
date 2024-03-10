@@ -15,4 +15,15 @@ leptos = { version = "0.6.6", default-features = false, features = ["csr"] }
 leptos_router = { version = "0.6.6", default-features = false, features = ["csr"] }
 lepu = { git = "https://github.com/lessflake/lepu.git" }
 wasm-bindgen-futures = "0.4.41"
-web-sys = { version = "0.3.68", features = ["Blob", "File", "FileList", "FileReader"] }
+
+[dependencies.web-sys]
+version = "0.3.68"
+features = [
+  "Blob",
+  "File",
+  "FileList",
+  "FileReader",
+  "IntersectionObserver",
+  "IntersectionObserverEntry",
+  "Storage",
+]

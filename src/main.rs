@@ -90,13 +90,19 @@ fn Upload(file: WriteSignal<Option<web_sys::File>>) -> impl IntoView {
 #[component]
 fn Navigation() -> impl IntoView {
     fn make_list<'a>(entries: impl Iterator<Item = &'a Chapter>) -> leptos::View {
+        let page = expect_context::<ReadSignal<usize>>();
         let inner = entries
             .map(|e: &Chapter| {
                 let sublist = e.has_children().then(|| make_list(e.children()));
                 let idx = format!("{}", e.index_in_spine());
                 let name = e.name().to_owned();
+                let class = if e.index_in_spine() == page.get() {
+                    "text-sky-400"
+                } else {
+                    "text-sky-300"
+                };
                 view! {
-                    <li><A href=idx class="text-sky-300">{name}</A>
+                    <li><A href=idx class=class>{name}</A>
                         {sublist}
                     </li>
                 }
@@ -151,7 +157,7 @@ fn convert(text: &Text<'_>) -> leptos::View {
         TextKind::Header => html::div()
             .attr(
                 "class",
-                "pt-8 pb-6 text-left font-sans font-bold text-4xl tracking-tight leading-none",
+                "mt-8 mb-6 text-left font-sans font-bold text-4xl tracking-tight leading-none",
             )
             .child(html::h1().child(children))
             .into_view(),
@@ -188,18 +194,69 @@ fn Content() -> impl IntoView {
         }
     };
 
+    // FIXME: not meant to write to signals within effects
     create_effect(move |_| set_page.set(page()));
+
+    let (vs, set_vs) = create_signal(std::collections::BTreeSet::<usize>::new());
+    let first_visible_block = create_memo(move |_| vs.get().iter().min().copied());
+
+    create_effect(move |_| {
+        let Ok(Some(storage)) = leptos::window().local_storage() else {
+            return;
+        };
+        let Some(Some(book)) = book.get() else { return };
+        let Some(para) = first_visible_block.get() else {
+            return;
+        };
+        let book = book.borrow();
+        let id = book.identifier();
+        let page = page();
+        if let Err(e) = storage.set_item(id, &format!("{page}:{para}")) {
+            logging::log!("failed to set local storage: {e:?}");
+        }
+    });
+
+    let cb = move |entries, _| {
+        for entry in entries {
+            let entry = web_sys::IntersectionObserverEntry::from(entry);
+            let id = entry.target().id().parse::<usize>().unwrap();
+            match entry.is_intersecting() {
+                true => set_vs.update(|vs| _ = vs.insert(id)),
+                false => set_vs.update(|vs| _ = vs.remove(&id)),
+            }
+        }
+    };
+
+    let cb: wasm_bindgen::closure::Closure<
+        dyn Fn(Vec<wasm_bindgen::JsValue>, web_sys::IntersectionObserver),
+    > = wasm_bindgen::closure::Closure::new(cb);
+
+    use wasm_bindgen::JsCast as _;
+    let obs = web_sys::IntersectionObserver::new(cb.as_ref().unchecked_ref()).unwrap();
+
+    // TODO: cleanup the intersection observer
+    on_cleanup(|| drop(cb));
 
     let text = move || {
         let mut out: Vec<View> = Vec::new();
 
+        let mut id = 0;
         let book = book.get().unwrap().unwrap();
         book.borrow_mut()
-            .traverse_chapter(page(), |content, _| match content {
-                Content::Textual(tc) => {
-                    out.push(convert(&tc));
-                }
-                Content::Image => {}
+            .traverse_chapter(page(), |content, _| {
+                let view = match content {
+                    Content::Textual(tc) => convert(&tc).into_view(),
+                    Content::Image => view! {}.into_view(),
+                };
+                let obs = obs.clone();
+                let view = html::div()
+                    .id(id.to_string())
+                    .child(view)
+                    .on_mount(move |node| {
+                        obs.observe(&node);
+                    });
+                out.push(view.into_view());
+                id += 1;
             })
             .unwrap();
 
