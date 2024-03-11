@@ -1,4 +1,8 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
 
 use base64::prelude::*;
 use leptos::*;
@@ -6,12 +10,15 @@ use leptos_router::*;
 use lepu::{Chapter, Content, Epub, Style, Text, TextKind};
 use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
 
-// Settings
-// - theme
-// - clear storage
-// - use storage
-//   - book (and adjust size threshold?)
-//   - position
+// TODO:
+// - bookmarks
+// - mobile styling & usability (touch regions on left and right sides to move pages)
+// - config
+//   - theme? maybe out of scope
+//   - clear storage
+//   - use storage
+//     - book (and adjust size threshold?)
+//     - position
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -20,16 +27,13 @@ fn main() {
 
 type Book = Option<Rc<RefCell<Epub>>>;
 
-#[derive(Default, Clone)]
-struct Position {
-    page: usize,
-    para: Option<usize>,
-}
-
 #[component]
 fn App() -> impl IntoView {
     let (source, set_source) = create_signal(None);
-    let (pos, set_pos) = create_signal(Position::default());
+    // selected page
+    let (page, set_page) = create_signal(0usize);
+    // map of what position we are on in every page
+    let (pos, set_pos) = create_signal(BTreeMap::<usize, usize>::new());
 
     let load_saved_pos = move |epub: &Epub| {
         if let Ok(Some(storage)) = leptos::window().local_storage() {
@@ -38,13 +42,15 @@ fn App() -> impl IntoView {
                 if let Some((page, para)) = saved_pos.split_once(':') {
                     let page = page.parse::<usize>().unwrap();
                     let para = para.parse::<usize>().unwrap();
-                    set_pos.set(Position {
-                        page,
-                        para: Some(para),
-                    });
-                    create_effect(move |_| {
-                        (use_navigate())(&page.to_string(), Default::default());
-                    });
+                    set_page.set(page);
+                    set_pos.update(|pos| _ = pos.insert(page, para));
+                    if let Ok(Some(route)) = storage.get_item(&format!("{id}-route")) {
+                        if route == "content" {
+                            create_effect(move |_| {
+                                (use_navigate())(&page.to_string(), Default::default());
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -92,6 +98,8 @@ fn App() -> impl IntoView {
         }
     }
 
+    provide_context(page);
+    provide_context(set_page);
     provide_context(pos);
     provide_context(set_pos);
     provide_context(book);
@@ -161,14 +169,25 @@ fn Upload(file: WriteSignal<Option<web_sys::File>>) -> impl IntoView {
 
 #[component]
 fn Navigation() -> impl IntoView {
+    create_effect(move |_| {
+        if let Ok(Some(storage)) = leptos::window().local_storage() {
+            let Some(book) = expect_context::<ReadSignal<Book>>().get() else {
+                return;
+            };
+            let book = book.borrow();
+            let id = book.identifier();
+            let _ = storage.set_item(&format!("{id}-route"), "nav");
+        }
+    });
+
     fn make_list<'a>(entries: impl Iterator<Item = &'a Chapter>) -> leptos::View {
-        let pos = expect_context::<ReadSignal<Position>>();
+        let page = expect_context::<ReadSignal<usize>>();
         let inner = entries
             .map(|e: &Chapter| {
                 let sublist = e.has_children().then(|| make_list(e.children()));
                 let idx = e.index_in_spine().to_string();
                 let name = e.name().to_owned();
-                let class = if e.index_in_spine() == pos.get().page {
+                let class = if e.index_in_spine() == page.get() {
                     "text-sky-100"
                 } else {
                     "text-sky-300"
@@ -268,11 +287,24 @@ struct ChapterParams {
 
 #[component]
 fn Content() -> impl IntoView {
+    create_effect(move |_| {
+        if let Ok(Some(storage)) = leptos::window().local_storage() {
+            let Some(book) = expect_context::<ReadSignal<Book>>().get() else {
+                return;
+            };
+            let book = book.borrow();
+            let id = book.identifier();
+            let _ = storage.set_item(&format!("{id}-route"), "content");
+        }
+    });
+
     let params = use_params::<ChapterParams>();
-    let pos = expect_context::<ReadSignal<Position>>();
-    let set_pos = expect_context::<WriteSignal<Position>>();
+    let pos = expect_context::<ReadSignal<BTreeMap<usize, usize>>>();
+    let set_pos = expect_context::<WriteSignal<BTreeMap<usize, usize>>>();
+    let cur_page = expect_context::<ReadSignal<usize>>();
+    let set_page = expect_context::<WriteSignal<usize>>();
     let book = expect_context::<ReadSignal<Book>>();
-    let page = move || match params.with(|p| p.as_ref().map(|p| p.idx).ok().flatten()) {
+    let param_page = move || match params.with(|p| p.as_ref().map(|p| p.idx).ok().flatten()) {
         Some(page) => page,
         None => {
             if book.get().is_none() {
@@ -290,9 +322,9 @@ fn Content() -> impl IntoView {
     };
 
     // FIXME: not meant to write to signals within effects
-    create_effect(move |_| set_pos.update(|pos| pos.page = page()));
+    create_effect(move |_| set_page.set(param_page()));
 
-    let (vs, set_vs) = create_signal(std::collections::BTreeSet::<usize>::new());
+    let (vs, set_vs) = create_signal(BTreeSet::<usize>::new());
     let first_visible_block = create_memo(move |_| vs.get().iter().min().copied());
 
     create_effect(move |_| {
@@ -305,14 +337,12 @@ fn Content() -> impl IntoView {
         let Some(book) = book.get() else { return };
         let book = book.borrow();
         let id = book.identifier();
-        let page = page();
+        let page = param_page();
         if para != 0 {
             // FIXME: not meant to write to signals within effects
-            set_pos.update(move |pos| pos.para = Some(para));
+            set_pos.update(move |pos| _ = pos.insert(page, para));
         }
-        if let Err(e) = storage.set_item(id, &format!("{page}:{para}")) {
-            logging::log!("failed to set local storage: {e:?}");
-        }
+        let _ = storage.set_item(id, &format!("{page}:{para}"));
     });
 
     let cb = move |entries, _| {
@@ -335,7 +365,8 @@ fn Content() -> impl IntoView {
 
         let mut id = 0;
         let book = book.get().unwrap();
-        let page = page();
+        let page = param_page();
+        let cur_page = cur_page.get();
         book.borrow_mut()
             .traverse_chapter(page, |content, _| {
                 let view = match content {
@@ -349,7 +380,7 @@ fn Content() -> impl IntoView {
                     .on_mount(move |node| {
                         obs.observe(&node);
                         let pos = pos.get_untracked();
-                        if Some(id) == pos.para && id != 0 && page == pos.page {
+                        if Some(id) == pos.get(&page).copied() && id != 0 && page == cur_page {
                             create_effect(move |_| {
                                 node.scroll_into_view();
                             });
@@ -364,7 +395,6 @@ fn Content() -> impl IntoView {
     };
 
     let leave = move || {
-        set_pos.update(|pos| pos.para = None);
         set_vs.set(Default::default());
         (use_navigate())("/", Default::default());
     };
@@ -375,23 +405,20 @@ fn Content() -> impl IntoView {
             return;
         }
         let move_page = |id| {
-            set_pos.set(Position {
-                page: id,
-                para: None,
-            });
+            set_page.set(id);
             set_vs.set(Default::default());
             navigate(&id.to_string(), Default::default());
         };
         match &*ev.key() {
             "ArrowLeft" => {
-                let id = page();
+                let id = param_page();
                 if id == 0 {
                     return;
                 };
                 move_page(id - 1);
             }
             "ArrowRight" => {
-                let id = page();
+                let id = param_page();
                 let max_id = book.get().unwrap().borrow().document_count();
                 if id + 1 >= max_id {
                     return;
