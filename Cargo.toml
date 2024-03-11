@@ -10,6 +10,7 @@ codegen-units = 1
 opt-level = 'z'
 
 [dependencies]
+base64 = "0.22.0"
 console_error_panic_hook = "0.1.7"
 leptos = { version = "0.6.6", default-features = false, features = ["csr"] }
 leptos_router = { version = "0.6.6", default-features = false, features = ["csr"] }
