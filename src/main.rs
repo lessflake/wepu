@@ -1,8 +1,9 @@
+use std::{cell::RefCell, rc::Rc};
+
 use leptos::*;
 use leptos_router::*;
 use lepu::{Chapter, Content, Epub, Style, Text, TextKind};
-
-use std::{cell::RefCell, rc::Rc};
+use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -11,12 +12,19 @@ fn main() {
 
 type BookResource = Resource<Option<web_sys::File>, Option<Rc<RefCell<Epub>>>>;
 
+#[derive(Default, Clone, Copy)]
+struct Position {
+    page: usize,
+    para: Option<usize>,
+}
+
 #[component]
 fn App() -> impl IntoView {
     let (source, set_source) = create_signal(None);
+    let (pos, set_pos) = create_signal(Position::default());
     let res = create_local_resource(
         move || source.get(),
-        |file: Option<web_sys::File>| async move {
+        move |file: Option<web_sys::File>| async move {
             use web_sys::js_sys::Uint8Array;
             let file = file?;
             let promise = file.array_buffer();
@@ -24,23 +32,36 @@ fn App() -> impl IntoView {
             let res = future.await.ok()?;
             let buf = Uint8Array::new(&res).to_vec();
             let epub = Epub::new(buf).ok()?;
+
+            if let Ok(Some(storage)) = leptos::window().local_storage() {
+                let id = epub.identifier();
+                if let Ok(Some(saved_pos)) = storage.get_item(id) {
+                    if let Some((page, para)) = saved_pos.split_once(':') {
+                        let page = page.parse::<usize>().unwrap();
+                        let para = para.parse::<usize>().unwrap();
+                        set_pos.set(Position {
+                            page,
+                            para: Some(para),
+                        });
+                        (use_navigate())(&page.to_string(), Default::default());
+                    }
+                }
+            }
             Some(Rc::new(RefCell::new(epub)))
         },
     );
 
-    let (page, set_page) = create_signal(0usize);
-
-    provide_context(page);
-    provide_context(set_page);
+    provide_context(pos);
+    provide_context(set_pos);
     provide_context(res);
 
     let main_view = move || {
-        let book_view = move || matches!(res.get(), Some(Some(_)));
+        let book_exists = move || matches!(res.get(), Some(Some(_)));
         let upload_view = move || {
             view! { <Upload file=set_source /> }
         };
         view! {
-            <Show when=book_view fallback=upload_view>
+            <Show when=book_exists fallback=upload_view>
                 <Outlet/>
             </Show>
         }
@@ -90,13 +111,13 @@ fn Upload(file: WriteSignal<Option<web_sys::File>>) -> impl IntoView {
 #[component]
 fn Navigation() -> impl IntoView {
     fn make_list<'a>(entries: impl Iterator<Item = &'a Chapter>) -> leptos::View {
-        let page = expect_context::<ReadSignal<usize>>();
+        let pos = expect_context::<ReadSignal<Position>>();
         let inner = entries
             .map(|e: &Chapter| {
                 let sublist = e.has_children().then(|| make_list(e.children()));
-                let idx = format!("{}", e.index_in_spine());
+                let idx = e.index_in_spine().to_string();
                 let name = e.name().to_owned();
-                let class = if e.index_in_spine() == page.get() {
+                let class = if e.index_in_spine() == pos.get().page {
                     "text-sky-400"
                 } else {
                     "text-sky-300"
@@ -177,7 +198,8 @@ struct ChapterParams {
 #[component]
 fn Content() -> impl IntoView {
     let params = use_params::<ChapterParams>();
-    let set_page = expect_context::<WriteSignal<usize>>();
+    let pos = expect_context::<ReadSignal<Position>>();
+    let set_pos = expect_context::<WriteSignal<Position>>();
     let book = expect_context::<BookResource>();
     let page = move || match params.with(|p| p.as_ref().map(|p| p.idx).ok().flatten()) {
         Some(page) => page,
@@ -195,22 +217,25 @@ fn Content() -> impl IntoView {
     };
 
     // FIXME: not meant to write to signals within effects
-    create_effect(move |_| set_page.set(page()));
+    create_effect(move |_| set_pos.update(|pos| pos.page = page()));
 
     let (vs, set_vs) = create_signal(std::collections::BTreeSet::<usize>::new());
     let first_visible_block = create_memo(move |_| vs.get().iter().min().copied());
 
     create_effect(move |_| {
+        let Some(para) = first_visible_block.get() else {
+            return;
+        };
         let Ok(Some(storage)) = leptos::window().local_storage() else {
             return;
         };
         let Some(Some(book)) = book.get() else { return };
-        let Some(para) = first_visible_block.get() else {
-            return;
-        };
         let book = book.borrow();
         let id = book.identifier();
         let page = page();
+        if para != 0 {
+            set_pos.update(move |pos| pos.para = Some(para));
+        }
         if let Err(e) = storage.set_item(id, &format!("{page}:{para}")) {
             logging::log!("failed to set local storage: {e:?}");
         }
@@ -227,15 +252,16 @@ fn Content() -> impl IntoView {
         }
     };
 
-    let cb: wasm_bindgen::closure::Closure<
-        dyn Fn(Vec<wasm_bindgen::JsValue>, web_sys::IntersectionObserver),
-    > = wasm_bindgen::closure::Closure::new(cb);
-
-    use wasm_bindgen::JsCast as _;
+    let cb: Closure<dyn Fn(Vec<JsValue>, web_sys::IntersectionObserver)> = Closure::new(cb);
     let obs = web_sys::IntersectionObserver::new(cb.as_ref().unchecked_ref()).unwrap();
 
-    // TODO: cleanup the intersection observer
-    on_cleanup(|| drop(cb));
+    {
+        let clean_obs = obs.clone();
+        on_cleanup(move || {
+            clean_obs.disconnect();
+            drop(cb)
+        });
+    }
 
     let text = move || {
         let mut out: Vec<View> = Vec::new();
@@ -254,6 +280,11 @@ fn Content() -> impl IntoView {
                     .child(view)
                     .on_mount(move |node| {
                         obs.observe(&node);
+                        if Some(id) == pos.get_untracked().para && id != 0 {
+                            create_effect(move |_| {
+                                node.scroll_into_view();
+                            });
+                        }
                     });
                 out.push(view.into_view());
                 id += 1;
@@ -268,13 +299,21 @@ fn Content() -> impl IntoView {
         if ev.alt_key() || ev.shift_key() || ev.meta_key() || ev.ctrl_key() {
             return;
         }
+        let move_page = |id| {
+            set_pos.set(Position {
+                page: id,
+                para: None,
+            });
+            set_vs.set(Default::default());
+            navigate(&id.to_string(), Default::default());
+        };
         match &*ev.key() {
             "ArrowLeft" => {
                 let id = page();
                 if id == 0 {
                     return;
                 };
-                navigate(&format!("/{}", id - 1), Default::default());
+                move_page(id - 1);
             }
             "ArrowRight" => {
                 let id = page();
@@ -282,7 +321,7 @@ fn Content() -> impl IntoView {
                 if id + 1 >= max_id {
                     return;
                 };
-                navigate(&format!("/{}", id + 1), Default::default());
+                move_page(id + 1);
             }
             "Escape" => navigate("/", Default::default()),
             _ => {}
