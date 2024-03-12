@@ -6,10 +6,18 @@ module.exports = {
   theme: {
     fontFamily: {
       'sans': ['Inter', 'sans-serif'],
-      'serif': ['Crimson Pro', 'EB Garamond', 'Lora', 'serif'],
+      'serif': ['Crimson Pro', 'serif'],
+    },
+    screens: {
+      'sm': '480px',
+      'md': '720px',
+      'lg': '1024px',
+      'xl': '1280px',
     },
     extend: {},
   },
-  plugins: [],
+  plugins: [
+    require('@tailwindcss/forms'),
+  ],
 }
 

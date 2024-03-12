@@ -14,12 +14,6 @@ mod input;
 
 // TODO:
 // - mobile styling & usability (touch regions on left and right sides to move pages)
-// - config
-//   - theme? maybe out of scope
-//   - clear storage
-//   - use storage
-//     - book (and adjust size threshold?)
-//     - position
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -33,6 +27,48 @@ type Marks = Rc<RefCell<BTreeMap<char, (usize, usize)>>>;
 // "b" => base64 encoded epub (most recently loaded book)
 // "{book identifier}" => "{page}:{para}" (current position)
 // "{book identifier}-route" => "nav" | "content" (current route)
+// "c" => "{true|false}:{true|false}" (config fields in order)
+
+#[derive(Debug)]
+struct Config {
+    save_position: bool,
+    cache_book: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            save_position: true,
+            cache_book: false,
+        }
+    }
+}
+
+fn load_config() -> Option<Config> {
+    let Ok(Some(storage)) = leptos::window().local_storage() else {
+        return None;
+    };
+    let Ok(Some(config_string)) = storage.get_item("c") else {
+        return None;
+    };
+
+    logging::log!("loaded: {config_string}");
+    let (save_position, cache_book) = config_string.split_once(':')?;
+    Some(Config {
+        save_position: save_position.parse::<bool>().ok()?,
+        cache_book: cache_book.parse::<bool>().ok()?,
+    })
+}
+
+fn save_config(config: &Config) {
+    let Ok(Some(storage)) = leptos::window().local_storage() else {
+        return;
+    };
+
+    let config_string = format!("{}:{}", config.save_position, config.cache_book);
+    logging::log!("{config_string}");
+    let _ = storage.set_item("c", &config_string);
+}
 
 #[component]
 fn App() -> impl IntoView {
@@ -44,6 +80,9 @@ fn App() -> impl IntoView {
     // map of bookmarks
     let marks = Rc::new(RefCell::new(BTreeMap::new()));
     provide_context::<Marks>(marks);
+
+    let config = Rc::new(RefCell::new(load_config().unwrap_or_default()));
+    provide_context(config.clone());
 
     let load_saved_pos = move |epub: &Epub| {
         if let Ok(Some(storage)) = leptos::window().local_storage() {
@@ -80,30 +119,37 @@ fn App() -> impl IntoView {
         },
     );
 
+    let config_ = config.clone();
     create_effect(move |_| {
         let Some(Some(buf)) = res.get() else { return };
         let encoded = BASE64_STANDARD.encode(&buf);
         let Ok(epub) = Epub::new(buf) else { return };
-        if let Ok(Some(storage)) = leptos::window().local_storage() {
-            if encoded.len() < 3_000_000 {
-                let _ = storage.set_item("b", &encoded);
-            } else {
-                let _ = storage.remove_item("b");
+        if config_.borrow().cache_book {
+            if let Ok(Some(storage)) = leptos::window().local_storage() {
+                if encoded.len() < 3_000_000 {
+                    let _ = storage.set_item("b", &encoded);
+                } else {
+                    let _ = storage.remove_item("b");
+                }
             }
         }
-        load_saved_pos(&epub);
+        if config_.borrow().save_position {
+            load_saved_pos(&epub);
+        }
         // FIXME: not meant to write to signals within effects
         // reset the resource to save some memory
         set_source.set(None);
         set_book.set(Some(Rc::new(RefCell::new(epub))));
     });
 
-    if let Ok(Some(storage)) = leptos::window().local_storage() {
-        if let Ok(Some(saved_book)) = storage.get_item("b") {
-            if let Ok(data) = BASE64_STANDARD.decode(saved_book) {
-                let epub = Epub::new(data).ok().unwrap();
-                load_saved_pos(&epub);
-                set_book.set(Some(Rc::new(RefCell::new(epub))));
+    if config.borrow().cache_book {
+        if let Ok(Some(storage)) = leptos::window().local_storage() {
+            if let Ok(Some(saved_book)) = storage.get_item("b") {
+                if let Ok(data) = BASE64_STANDARD.decode(saved_book) {
+                    let epub = Epub::new(data).ok().unwrap();
+                    load_saved_pos(&epub);
+                    set_book.set(Some(Rc::new(RefCell::new(epub))));
+                }
             }
         }
     }
@@ -122,6 +168,16 @@ fn App() -> impl IntoView {
         };
         view! {
             <Show when=book_exists fallback=upload_view>
+                <nav>
+                    <div class="flex justify-between px-1 text-sm md:text-base">
+                        <button on:click=move |_| unload_book()>"✕"</button>
+                        <ul class="flex space-x-6 md:space-x-10">
+                            <li><A href={move || format!("{}", page.get())}>read</A></li>
+                            <li><A href="">table of contents</A></li>
+                            <li><A href="settings">settings</A></li>
+                        </ul>
+                    </div>
+                </nav>
                 <Outlet/>
             </Show>
         }
@@ -130,17 +186,71 @@ fn App() -> impl IntoView {
     view! {
         <Router base="/wepu">
             <main>
-                <div class="flex flex-col max-w-screen-sm xl:max-w-screen-md
-                            min-h-screen mx-auto py-10 text-2xl">
+                <div class="flex flex-col max-w-screen-sm md:max-w-screen-md
+                            min-h-screen mx-auto px-2 py-2 md:py-10 text-lg md:text-2xl">
                     <Routes base="/wepu".to_string()>
                         <Route path="/" view=main_view>
                             <Route path="" view=Navigation />
+                            <Route path="settings" view=Settings />
                             <Route path=":idx" view=Content />
                         </Route>
                     </Routes>
                 </div>
             </main>
         </Router>
+    }
+}
+
+#[component]
+fn Settings() -> impl IntoView {
+    let clear_storage = || {
+        if let Ok(Some(storage)) = leptos::window().local_storage() {
+            let _ = storage.clear();
+        }
+    };
+
+    let config = expect_context::<Rc<RefCell<Config>>>();
+    let config_ = config.clone();
+    let save_position = move |ev| {
+        config_.borrow_mut().save_position = event_target_checked(&ev);
+        save_config(&*config_.borrow());
+    };
+    let config_ = config.clone();
+    let cache_book = move |ev| {
+        let checked = event_target_checked(&ev);
+        config_.borrow_mut().cache_book = checked;
+        save_config(&*config_.borrow());
+        if !checked {
+            if let Ok(Some(storage)) = leptos::window().local_storage() {
+                let _ = storage.remove_item("b");
+            }
+        }
+    };
+
+    view! {
+        <h1 class="mt-8 mb-10 text-left font-sans font-bold text-2xl md:text-4xl tracking-tight leading-none">
+            Settings
+        </h1>
+
+        <div class="flex flex-col justify-center text-base space-y-3">
+        <label class="inline-flex items-center">
+            <input type="checkbox" class="rounded-xs text-sky-500" id="save-position" checked={config.borrow().save_position} on:input=save_position/>
+            <span class="ml-2">Save book position between sessions</span>
+        </label>
+        <label class="inline-flex items-center">
+            <input type="checkbox" class="rounded-xs text-sky-500" id="cache-book" checked={config.borrow().cache_book} on:input=cache_book/>
+            <span class="ml-2">"Save most recent book between sessions (if book smaller than 3 megabytes)"</span>
+        </label>
+            <div><button class="bg-zinc-200 text-zinc-800 mt-2 active:bg-sky-500 active:text-zinc-200 rounded-lg px-3 py-1" on:click=move |_| clear_storage()>Clear data</button></div>
+        </div>
+    }
+}
+
+fn unload_book() {
+    let set_book = expect_context::<WriteSignal<Book>>();
+    set_book.set(None);
+    if let Ok(Some(storage)) = leptos::window().local_storage() {
+        let _ = storage.remove_item("b");
     }
 }
 
@@ -179,16 +289,19 @@ fn Upload(file: WriteSignal<Option<web_sys::File>>) -> impl IntoView {
 
 #[component]
 fn Navigation() -> impl IntoView {
-    create_effect(move |_| {
-        if let Ok(Some(storage)) = leptos::window().local_storage() {
-            let Some(book) = expect_context::<ReadSignal<Book>>().get() else {
-                return;
-            };
-            let book = book.borrow();
-            let id = book.identifier();
-            let _ = storage.set_item(&format!("{id}-route"), "nav");
-        }
-    });
+    let config = expect_context::<Rc<RefCell<Config>>>();
+    if config.borrow().save_position {
+        create_effect(move |_| {
+            if let Ok(Some(storage)) = leptos::window().local_storage() {
+                let Some(book) = expect_context::<ReadSignal<Book>>().get() else {
+                    return;
+                };
+                let book = book.borrow();
+                let id = book.identifier();
+                let _ = storage.set_item(&format!("{id}-route"), "nav");
+            }
+        });
+    }
 
     fn make_list<'a>(entries: impl Iterator<Item = &'a Chapter>) -> leptos::View {
         let page = expect_context::<ReadSignal<usize>>();
@@ -198,9 +311,9 @@ fn Navigation() -> impl IntoView {
                 let idx = e.index_in_spine().to_string();
                 let name = e.name().to_owned();
                 let class = if e.index_in_spine() == page.get() {
-                    "text-sky-100"
+                    "text-sky-500"
                 } else {
-                    "text-sky-300"
+                    "text-zinc-200"
                 };
                 view! {
                     <li><div class="pb-2"><A href=idx class=class>{name}</A></div>
@@ -213,38 +326,15 @@ fn Navigation() -> impl IntoView {
         html::ul().classes("ml-5").child(inner).into_view()
     }
 
-    let unload_book = move || {
-        let set_book = expect_context::<WriteSignal<Book>>();
-        set_book.set(None);
-        if let Ok(Some(storage)) = leptos::window().local_storage() {
-            let _ = storage.remove_item("b");
-        }
-    };
-
-    let handle = window_event_listener(ev::keyup, move |ev: ev::KeyboardEvent| {
-        if ev.alt_key() || ev.shift_key() || ev.meta_key() || ev.ctrl_key() {
-            return;
-        }
-        match &*ev.key() {
-            "Escape" => unload_book(),
-            _ => {}
-        }
-    });
-
-    on_cleanup(move || handle.remove());
-
     view! {
-        <div class="absolute top-2 left-5 text-4xl font-thin">
-            <button on:click=move |_| unload_book()>"✕"</button>
-        </div>
         { move || {
             let book = expect_context::<ReadSignal<Book>>().get().unwrap();
             let b = book.borrow();
             view! {
-                <div class="mt-8 mb-10 text-left font-sans font-bold text-4xl tracking-tight leading-none">
+                <div class="mt-8 mb-10 text-left font-bold text-2xl md:text-4xl tracking-tight leading-none">
                     <h1>{b.title().to_owned()}</h1>
                 </div>
-                <div class="text-justify font-serif">
+                <div class="text-justify font-serif tracking-tight leading-tight">
                     {make_list(b.chapters())}
                 </div>
             }
@@ -278,7 +368,7 @@ fn convert(text: &Text<'_>) -> leptos::View {
         TextKind::Header => html::h1()
             .attr(
                 "class",
-                "mt-8 mb-10 text-left font-sans font-bold text-4xl tracking-tight leading-none",
+                "mb-6 md:mb-10 text-left font-sans font-bold text-2xl md:text-4xl tracking-tight leading-none",
             )
             .child(children)
             .into_view(),
@@ -297,16 +387,19 @@ struct ChapterParams {
 
 #[component]
 fn Content() -> impl IntoView {
-    create_effect(move |_| {
-        if let Ok(Some(storage)) = leptos::window().local_storage() {
-            let Some(book) = expect_context::<ReadSignal<Book>>().get() else {
-                return;
-            };
-            let book = book.borrow();
-            let id = book.identifier();
-            let _ = storage.set_item(&format!("{id}-route"), "content");
-        }
-    });
+    let config = expect_context::<Rc<RefCell<Config>>>();
+    if config.borrow().save_position {
+        create_effect(move |_| {
+            if let Ok(Some(storage)) = leptos::window().local_storage() {
+                let Some(book) = expect_context::<ReadSignal<Book>>().get() else {
+                    return;
+                };
+                let book = book.borrow();
+                let id = book.identifier();
+                let _ = storage.set_item(&format!("{id}-route"), "content");
+            }
+        });
+    }
 
     let params = use_params::<ChapterParams>();
     let pos = expect_context::<ReadSignal<BTreeMap<usize, usize>>>();
@@ -337,6 +430,7 @@ fn Content() -> impl IntoView {
     let (vs, set_vs) = create_signal(BTreeSet::<usize>::new());
     let first_visible_block = create_memo(move |_| vs.get().iter().min().copied());
 
+    let config = expect_context::<Rc<RefCell<Config>>>();
     create_effect(move |_| {
         let Some(para) = first_visible_block.get() else {
             return;
@@ -352,7 +446,9 @@ fn Content() -> impl IntoView {
             // FIXME: not meant to write to signals within effects
             set_pos.update(move |pos| _ = pos.insert(page, para));
         }
-        let _ = storage.set_item(id, &format!("{page}:{para}"));
+        if config.borrow().save_position {
+            let _ = storage.set_item(id, &format!("{page}:{para}"));
+        }
     });
 
     let cb = move |entries, _| {
@@ -466,13 +562,10 @@ fn Content() -> impl IntoView {
     });
 
     view! {
-        <div class="absolute top-2 left-5 text-4xl font-thin">
-            <button on:click=move |_| leave()>"✕"</button>
-        </div>
         {move || {
             view! {
-                <div class="text-justify font-serif font-light space-y-5
-                            tracking-tight leading-tight">
+                <div class="text-justify font-serif font-light space-y-3 md:space-y-5
+                            tracking-tight leading-tight mt-8">
                     {text()}
                 </div>
             }
