@@ -10,8 +10,9 @@ use leptos_router::*;
 use lepu::{Chapter, Content, Epub, Style, Text, TextKind};
 use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
 
+mod input;
+
 // TODO:
-// - bookmarks
 // - mobile styling & usability (touch regions on left and right sides to move pages)
 // - config
 //   - theme? maybe out of scope
@@ -26,6 +27,12 @@ fn main() {
 }
 
 type Book = Option<Rc<RefCell<Epub>>>;
+type Marks = Rc<RefCell<BTreeMap<char, (usize, usize)>>>;
+
+// local storage usage (non-normative)
+// "b" => base64 encoded epub (most recently loaded book)
+// "{book identifier}" => "{page}:{para}" (current position)
+// "{book identifier}-route" => "nav" | "content" (current route)
 
 #[component]
 fn App() -> impl IntoView {
@@ -34,6 +41,9 @@ fn App() -> impl IntoView {
     let (page, set_page) = create_signal(0usize);
     // map of what position we are on in every page
     let (pos, set_pos) = create_signal(BTreeMap::<usize, usize>::new());
+    // map of bookmarks
+    let marks = Rc::new(RefCell::new(BTreeMap::new()));
+    provide_context::<Marks>(marks);
 
     let load_saved_pos = move |epub: &Epub| {
         if let Ok(Some(storage)) = leptos::window().local_storage() {
@@ -379,12 +389,13 @@ fn Content() -> impl IntoView {
                     .child(view)
                     .on_mount(move |node| {
                         obs.observe(&node);
-                        let pos = pos.get_untracked();
-                        if Some(id) == pos.get(&page).copied() && id != 0 && page == cur_page {
-                            create_effect(move |_| {
-                                node.scroll_into_view();
-                            });
-                        }
+                        pos.with_untracked(move |pos| {
+                            if Some(id) == pos.get(&page).copied() && id != 0 && page == cur_page {
+                                create_effect(move |_| {
+                                    node.scroll_into_view();
+                                });
+                            }
+                        });
                     });
                 out.push(view.into_view());
                 id += 1;
@@ -400,6 +411,8 @@ fn Content() -> impl IntoView {
     };
 
     let navigate = use_navigate();
+    let handler = RefCell::new(input::Handler::new());
+    let marks = expect_context::<Marks>();
     let handle = window_event_listener(ev::keyup, move |ev: ev::KeyboardEvent| {
         if ev.alt_key() || ev.shift_key() || ev.meta_key() || ev.ctrl_key() {
             return;
@@ -409,24 +422,40 @@ fn Content() -> impl IntoView {
             set_vs.set(Default::default());
             navigate(&id.to_string(), Default::default());
         };
-        match &*ev.key() {
-            "ArrowLeft" => {
-                let id = param_page();
-                if id == 0 {
-                    return;
-                };
-                move_page(id - 1);
-            }
-            "ArrowRight" => {
+
+        let Some(action) = handler.borrow_mut().handle(&*ev.key()) else {
+            return;
+        };
+
+        use input::Action;
+        match action {
+            Action::NextPage => {
                 let id = param_page();
                 let max_id = book.get().unwrap().borrow().document_count();
-                if id + 1 >= max_id {
+                if id + 1 < max_id {
+                    move_page(id + 1);
+                }
+            }
+            Action::PreviousPage => {
+                let id = param_page();
+                if id > 0 {
+                    move_page(id - 1);
+                }
+            }
+            Action::SetMark(c) => {
+                let Some(para) = first_visible_block.get() else {
                     return;
                 };
-                move_page(id + 1);
+                let page = param_page();
+                marks.borrow_mut().insert(c, (page, para));
             }
-            "Escape" => leave(),
-            _ => {}
+            Action::FollowMark(c) => {
+                if let Some((page, para)) = marks.borrow().get(&c).copied() {
+                    set_pos.update(move |pos| _ = pos.insert(page, para));
+                    move_page(page);
+                }
+            }
+            Action::Leave => leave(),
         }
     });
 
