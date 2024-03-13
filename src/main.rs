@@ -84,6 +84,10 @@ fn App() -> impl IntoView {
     let config = Rc::new(RefCell::new(load_config().unwrap_or_default()));
     provide_context(config.clone());
 
+    create_effect(move |_| {
+        (use_navigate())("", Default::default());
+    });
+
     let load_saved_pos = move |epub: &Epub| {
         if let Ok(Some(storage)) = leptos::window().local_storage() {
             let id = epub.identifier();
@@ -136,7 +140,6 @@ fn App() -> impl IntoView {
         if config_.borrow().save_position {
             load_saved_pos(&epub);
         }
-        // FIXME: not meant to write to signals within effects
         // reset the resource to save some memory
         set_source.set(None);
         set_book.set(Some(Rc::new(RefCell::new(epub))));
@@ -250,6 +253,7 @@ fn Settings() -> impl IntoView {
 fn unload_book() {
     let set_book = expect_context::<WriteSignal<Book>>();
     set_book.set(None);
+    (use_navigate())("", Default::default());
     if let Ok(Some(storage)) = leptos::window().local_storage() {
         let _ = storage.remove_item("b");
     }
@@ -410,22 +414,9 @@ fn Content() -> impl IntoView {
     let book = expect_context::<ReadSignal<Book>>();
     let param_page = move || match params.with(|p| p.as_ref().map(|p| p.idx).ok().flatten()) {
         Some(page) => page,
-        None => {
-            if book.get().is_none() {
-                // HACK: trailing slash makes this route match
-                (use_navigate())(
-                    "/",
-                    NavigateOptions {
-                        replace: true,
-                        ..Default::default()
-                    },
-                );
-            }
-            0
-        }
+        None => 0,
     };
 
-    // FIXME: not meant to write to signals within effects
     create_effect(move |_| set_page.set(param_page()));
 
     let (vs, set_vs) = create_signal(BTreeSet::<usize>::new());
@@ -443,10 +434,13 @@ fn Content() -> impl IntoView {
         let book = book.borrow();
         let id = book.identifier();
         let page = param_page();
-        if para != 0 {
-            // FIXME: not meant to write to signals within effects
-            set_pos.update(move |pos| _ = pos.insert(page, para));
-        }
+        set_pos.update(move |pos| {
+            if para > 1 {
+                pos.insert(page, para);
+            } else {
+                pos.remove(&page);
+            }
+        });
         if config.borrow().save_position {
             let _ = storage.set_item(id, &format!("{page}:{para}"));
         }
