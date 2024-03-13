@@ -187,7 +187,8 @@ fn App() -> impl IntoView {
         <Router base="/wepu">
             <main>
                 <div class="flex flex-col max-w-screen-sm md:max-w-screen-md
-                            min-h-screen mx-auto px-2 py-2 md:py-10 text-lg md:text-2xl">
+                            min-h-screen mx-auto px-2 pb-2 pt-2 md:pt-10
+                            text-base sm:text-lg md:text-2xl">
                     <Routes base="/wepu".to_string()>
                         <Route path="/" view=main_view>
                             <Route path="" view=Navigation />
@@ -509,35 +510,44 @@ fn Content() -> impl IntoView {
     let navigate = use_navigate();
     let handler = RefCell::new(input::Handler::new());
     let marks = expect_context::<Marks>();
+
+    let move_page = move |id| {
+        set_page.set(id);
+        set_vs.set(Default::default());
+        navigate(&id.to_string(), Default::default());
+    };
+
+    let move_page_ = move_page.clone();
+    let move_next = move || {
+        let id = param_page();
+        let max_id = book.get().unwrap().borrow().document_count();
+        if id + 1 < max_id {
+            move_page_(id + 1);
+        }
+    };
+
+    let move_page_ = move_page.clone();
+    let move_previous = move || {
+        let id = param_page();
+        if id > 0 {
+            move_page_(id - 1);
+        }
+    };
+
+    let move_next_ = move_next.clone();
+    let move_previous_ = move_previous.clone();
     let handle = window_event_listener(ev::keyup, move |ev: ev::KeyboardEvent| {
         if ev.alt_key() || ev.shift_key() || ev.meta_key() || ev.ctrl_key() {
             return;
         }
-        let move_page = |id| {
-            set_page.set(id);
-            set_vs.set(Default::default());
-            navigate(&id.to_string(), Default::default());
-        };
-
         let Some(action) = handler.borrow_mut().handle(&*ev.key()) else {
             return;
         };
 
         use input::Action;
         match action {
-            Action::NextPage => {
-                let id = param_page();
-                let max_id = book.get().unwrap().borrow().document_count();
-                if id + 1 < max_id {
-                    move_page(id + 1);
-                }
-            }
-            Action::PreviousPage => {
-                let id = param_page();
-                if id > 0 {
-                    move_page(id - 1);
-                }
-            }
+            Action::NextPage => move_next_(),
+            Action::PreviousPage => move_previous_(),
             Action::SetMark(c) => {
                 let Some(para) = first_visible_block.get() else {
                     return;
@@ -564,11 +574,24 @@ fn Content() -> impl IntoView {
     view! {
         {move || {
             view! {
-                <div class="text-justify font-serif font-light space-y-3 md:space-y-5
-                            tracking-tight leading-tight mt-8">
+                <div class="sm:text-justify font-serif font-light space-y-3 md:space-y-5 mt-8">
                     {text()}
                 </div>
             }
         }}
+        <div class="flex justify-center pt-2 md:pt-4 pb-4">
+            <div>
+                <button class="mt-2 active:bg-sky-500
+                               active:text-zinc-200 rounded-lg px-3"
+                        on:click=move |_| move_previous()>
+                    "←"
+                </button>
+                <button class="mt-2 active:bg-sky-500
+                               active:text-zinc-200 rounded-lg px-3"
+                        on:click=move |_| move_next()>
+                    "→"
+                </button>
+            </div>
+        </div>
     }
 }
