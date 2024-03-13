@@ -12,9 +12,6 @@ use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
 
 mod input;
 
-// TODO:
-// - mobile styling & usability (touch regions on left and right sides to move pages)
-
 fn main() {
     console_error_panic_hook::set_once();
     mount_to_body(App);
@@ -52,7 +49,6 @@ fn load_config() -> Option<Config> {
         return None;
     };
 
-    logging::log!("loaded: {config_string}");
     let (save_position, cache_book) = config_string.split_once(':')?;
     Some(Config {
         save_position: save_position.parse::<bool>().ok()?,
@@ -66,7 +62,6 @@ fn save_config(config: &Config) {
     };
 
     let config_string = format!("{}:{}", config.save_position, config.cache_book);
-    logging::log!("{config_string}");
     let _ = storage.set_item("c", &config_string);
 }
 
@@ -164,27 +159,23 @@ fn App() -> impl IntoView {
     provide_context(book);
     provide_context(set_book);
 
+    let (nav_state, set_nav_state) = create_signal(NavState::Upload);
+    provide_context(set_nav_state);
+
+    let book_exists = move || matches!(book.get(), Some(_));
+
     let main_view = move || {
-        let book_exists = move || matches!(book.get(), Some(_));
         let upload_view = move || {
             view! { <Upload file=set_source /> }
         };
         view! {
             <Show when=book_exists fallback=upload_view>
-                <nav>
-                    <div class="flex justify-between px-1 text-sm md:text-base">
-                        <button on:click=move |_| unload_book()>"✕"</button>
-                        <ul class="flex space-x-6 md:space-x-10">
-                            <li><A href={move || format!("{}", page.get())}>read</A></li>
-                            <li><A href="">table of contents</A></li>
-                            <li><A href="settings">settings</A></li>
-                        </ul>
-                    </div>
-                </nav>
                 <Outlet/>
             </Show>
         }
     };
+
+    let book_exists = move || matches!(book.get(), Some(_));
 
     view! {
         <Router base="/wepu">
@@ -192,12 +183,30 @@ fn App() -> impl IntoView {
                 <div class="flex flex-col max-w-screen-sm md:max-w-screen-md
                             min-h-screen mx-auto px-2 pb-2 pt-2 md:pt-10
                             text-base sm:text-lg md:text-2xl">
+                    <nav>
+                        <div class="flex justify-between px-1 text-sm md:text-base">
+                            <div>
+                                <Show when=book_exists>
+                                    <button class="hover:text-sky-500" on:click=move |_| unload_book()>"✕"</button>
+                                </Show>
+                            </div>
+                            <ul class="flex space-x-6 md:space-x-10">
+                                <Show when=book_exists fallback=move || view! {
+                                    <li><span class:underline=move || nav_state.get() == NavState::Upload><A class="hover:text-sky-500" href="">load</A></span></li>
+                                }>
+                                    <li><span class:underline=move || nav_state.get() == NavState::Read><A class="hover:text-sky-500" href={move || format!("{}", page.get())}>read</A></span></li>
+                                    <li><span class:underline=move || nav_state.get() == NavState::TableOfContents><A class="hover:text-sky-500" href="">table of contents</A></span></li>
+                                </Show>
+                                <li><span class:underline=move || nav_state.get() == NavState::Settings><A class="hover:text-sky-500" href="settings">settings</A></span></li>
+                            </ul>
+                        </div>
+                    </nav>
                     <Routes base="/wepu".to_string()>
                         <Route path="/" view=main_view>
                             <Route path="" view=Navigation />
-                            <Route path="settings" view=Settings />
                             <Route path=":idx" view=Content />
                         </Route>
+                        <Route path="settings" view=Settings />
                     </Routes>
                 </div>
             </main>
@@ -205,8 +214,19 @@ fn App() -> impl IntoView {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum NavState {
+    Upload,
+    Read,
+    TableOfContents,
+    Settings,
+}
+
 #[component]
 fn Settings() -> impl IntoView {
+    let set_nav_state = expect_context::<WriteSignal<NavState>>();
+    set_nav_state.set(NavState::Settings);
+
     let clear_storage = || {
         if let Ok(Some(storage)) = leptos::window().local_storage() {
             let _ = storage.clear();
@@ -261,6 +281,9 @@ fn unload_book() {
 
 #[component]
 fn Upload(file: WriteSignal<Option<web_sys::File>>) -> impl IntoView {
+    let set_nav_state = expect_context::<WriteSignal<NavState>>();
+    set_nav_state.set(NavState::Upload);
+
     let input_element: NodeRef<html::Input> = create_node_ref();
     let on_submit = move |ev: ev::Event| {
         ev.prevent_default();
@@ -294,6 +317,9 @@ fn Upload(file: WriteSignal<Option<web_sys::File>>) -> impl IntoView {
 
 #[component]
 fn Navigation() -> impl IntoView {
+    let set_nav_state = expect_context::<WriteSignal<NavState>>();
+    set_nav_state.set(NavState::TableOfContents);
+
     let config = expect_context::<Rc<RefCell<Config>>>();
     if config.borrow().save_position {
         create_effect(move |_| {
@@ -316,12 +342,12 @@ fn Navigation() -> impl IntoView {
                 let idx = e.index_in_spine().to_string();
                 let name = e.name().to_owned();
                 let class = if e.index_in_spine() == page.get() {
-                    "text-sky-500"
+                    "pb-2 underline"
                 } else {
-                    "text-zinc-200"
+                    "pb-2"
                 };
                 view! {
-                    <li><div class="pb-2"><A href=idx class=class>{name}</A></div>
+                    <li><div class=class><A href=idx class="hover:text-sky-500">{name}</A></div>
                         {sublist}
                     </li>
                 }
@@ -392,6 +418,9 @@ struct ChapterParams {
 
 #[component]
 fn Content() -> impl IntoView {
+    let set_nav_state = expect_context::<WriteSignal<NavState>>();
+    set_nav_state.set(NavState::Read);
+
     let config = expect_context::<Rc<RefCell<Config>>>();
     if config.borrow().save_position {
         create_effect(move |_| {
@@ -575,13 +604,11 @@ fn Content() -> impl IntoView {
         }}
         <div class="flex justify-center pt-2 md:pt-4 pb-4">
             <div>
-                <button class="mt-2 active:bg-sky-500
-                               active:text-zinc-200 rounded-lg px-3"
+                <button class="mt-2 px-3 hover:text-sky-500"
                         on:click=move |_| move_previous()>
                     "←"
                 </button>
-                <button class="mt-2 active:bg-sky-500
-                               active:text-zinc-200 rounded-lg px-3"
+                <button class="mt-2 px-3 hover:text-sky-500"
                         on:click=move |_| move_next()>
                     "→"
                 </button>
