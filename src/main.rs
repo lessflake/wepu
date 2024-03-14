@@ -118,6 +118,14 @@ fn App() -> impl IntoView {
         },
     );
 
+    fn set_title(title: &str) {
+        if !title.is_empty() {
+            document().set_title(&format!("{title} | wepu"));
+        } else {
+            document().set_title("wepu");
+        }
+    }
+
     let config_ = config.clone();
     create_effect(move |_| {
         let Some(Some(buf)) = res.get() else { return };
@@ -137,6 +145,7 @@ fn App() -> impl IntoView {
         }
         // reset the resource to save some memory
         set_source.set(None);
+        set_title(epub.title());
         set_book.set(Some(Rc::new(RefCell::new(epub))));
     });
 
@@ -146,6 +155,7 @@ fn App() -> impl IntoView {
                 if let Ok(data) = BASE64_STANDARD.decode(saved_book) {
                     let epub = Epub::new(data).ok().unwrap();
                     load_saved_pos(&epub);
+                    set_title(epub.title());
                     set_book.set(Some(Rc::new(RefCell::new(epub))));
                 }
             }
