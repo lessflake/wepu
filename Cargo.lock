@@ -711,7 +711,7 @@ dependencies = [
 [[package]]
 name = "lepu"
 version = "0.1.0"
-source = "git+https://github.com/lessflake/lepu.git#3a0a03f2277589b0b060a0af58340f7ccfc4722e"
+source = "git+https://github.com/lessflake/lepu.git#7e9eebc57be4dfd0c8a38b10b7e85ce9b4222c1b"
 dependencies = [
  "anyhow",
  "bitflags 2.4.2",
