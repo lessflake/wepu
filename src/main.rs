@@ -508,10 +508,21 @@ fn Content() -> impl IntoView {
         let page = param_page();
         let cur_page = cur_page.get();
         book.borrow_mut()
-            .traverse_chapter(page, |content, _| {
+            .traverse_chapter(page, |ctx, content, _| {
                 let view = match content {
                     Content::Textual(tc) => convert(&tc).into_view(),
-                    Content::Image => view! {}.into_view(),
+                    Content::Image(item) => {
+                        let Ok(data) = ctx.load(&item) else { return };
+                        let mime = item.mime();
+                        let mut data_string = format!("data:{mime};base64,");
+                        BASE64_STANDARD.encode_string(&data, &mut data_string);
+                        view! {
+                            <div class="flex justify-center py-2">
+                                <img src=data_string />
+                            </div>
+                        }
+                        .into_view()
+                    }
                 };
                 let obs = obs.clone();
                 let view = html::div()
