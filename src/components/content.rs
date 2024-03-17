@@ -9,43 +9,39 @@ use leptos_router::*;
 use lepu::{Content, Style, Text, TextKind};
 use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
 
-use crate::{book::Book, config, input, nav_state::NavState, Marks};
+use crate::{book::Book, config, input, nav_state::NavState, set_nav_state, Marks};
 
-#[derive(Params, PartialEq)]
+#[derive(Params, Debug, Clone, PartialEq)]
 struct ChapterParams {
     idx: Option<usize>,
 }
 
+// what is going on here?
+// - sets nav state
+// - keyboard handler
+//   - changes page
+//   - changes input handler state
+//   - changes marks
+
 #[component]
 pub fn Content() -> impl IntoView {
-    let set_nav_state = expect_context::<WriteSignal<NavState>>();
-    set_nav_state.set(NavState::Read);
-
-    let config = config::get();
-    if config.borrow().save_position {
-        create_effect(move |_| {
-            if let Ok(Some(storage)) = leptos::window().local_storage() {
-                let Some(book) = expect_context::<ReadSignal<Book>>().get() else {
-                    return;
-                };
-                let book = book.borrow();
-                let id = book.identifier();
-                let _ = storage.set_item(&format!("{id}-route"), "content");
-            }
-        });
+    let params = use_params::<ChapterParams>();
+    if !matches!(params.get_untracked(), Ok(ChapterParams { idx: Some(_) })) {
+        (use_navigate())("", Default::default());
     }
 
-    let params = use_params::<ChapterParams>();
+    set_nav_state(NavState::Read);
+
     let pos = expect_context::<ReadSignal<BTreeMap<usize, usize>>>();
     let set_pos = expect_context::<WriteSignal<BTreeMap<usize, usize>>>();
     let cur_page = expect_context::<ReadSignal<usize>>();
     let set_page = expect_context::<WriteSignal<usize>>();
     let book = expect_context::<ReadSignal<Book>>();
-    let param_page = move || match params.with(|p| p.as_ref().map(|p| p.idx).ok().flatten()) {
-        Some(page) => page,
-        None => 0,
+    let param_page = move || {
+        params
+            .with(|p| p.as_ref().map(|p| p.idx).ok().flatten())
+            .unwrap_or(0)
     };
-
     create_effect(move |_| set_page.set(param_page()));
 
     let (vs, set_vs) = create_signal(BTreeSet::<usize>::new());
@@ -60,7 +56,6 @@ pub fn Content() -> impl IntoView {
             return;
         };
         let Some(book) = book.get() else { return };
-        let book = book.borrow();
         let id = book.identifier();
         let page = param_page();
         set_pos.update(move |pos| {
@@ -97,41 +92,40 @@ pub fn Content() -> impl IntoView {
         let book = book.get().unwrap();
         let page = param_page();
         let cur_page = cur_page.get();
-        book.borrow_mut()
-            .traverse_chapter(page, |ctx, content, _| {
-                let view = match content {
-                    Content::Textual(tc) => convert(&tc).into_view(),
-                    Content::Image(item) => {
-                        let Ok(data) = ctx.load(&item) else { return };
-                        let mime = item.mime();
-                        let mut data_string = format!("data:{mime};base64,");
-                        BASE64_STANDARD.encode_string(&data, &mut data_string);
-                        view! {
-                            <div class="flex justify-center py-2">
-                                <img src=data_string />
-                            </div>
-                        }
-                        .into_view()
+        book.traverse_chapter(page, |ctx, content, _| {
+            let view = match content {
+                Content::Textual(tc) => convert(&tc).into_view(),
+                Content::Image(item) => {
+                    let Ok(data) = ctx.load(&item) else { return };
+                    let mime = item.mime();
+                    let mut data_string = format!("data:{mime};base64,");
+                    BASE64_STANDARD.encode_string(&data, &mut data_string);
+                    view! {
+                        <div class="flex justify-center py-2">
+                            <img src=data_string />
+                        </div>
                     }
-                };
-                let obs = obs.clone();
-                let view = html::div()
-                    .id(id.to_string())
-                    .child(view)
-                    .on_mount(move |node| {
-                        obs.observe(&node);
-                        pos.with_untracked(move |pos| {
-                            if Some(id) == pos.get(&page).copied() && id != 0 && page == cur_page {
-                                create_effect(move |_| {
-                                    node.scroll_into_view();
-                                });
-                            }
-                        });
+                    .into_view()
+                }
+            };
+            let obs = obs.clone();
+            let view = html::div()
+                .id(id.to_string())
+                .child(view)
+                .on_mount(move |node| {
+                    obs.observe(&node);
+                    pos.with_untracked(move |pos| {
+                        if Some(id) == pos.get(&page).copied() && id != 0 && page == cur_page {
+                            create_effect(move |_| {
+                                node.scroll_into_view();
+                            });
+                        }
                     });
-                out.push(view.into_view());
-                id += 1;
-            })
-            .unwrap();
+                });
+            out.push(view.into_view());
+            id += 1;
+        })
+        .unwrap();
 
         Some(out.into_iter().collect_view())
     };
@@ -154,7 +148,7 @@ pub fn Content() -> impl IntoView {
     let move_page_ = move_page.clone();
     let move_next = move || {
         let id = param_page();
-        let max_id = book.get().unwrap().borrow().document_count();
+        let max_id = book.get().unwrap().document_count();
         if id + 1 < max_id {
             move_page_(id + 1);
         }

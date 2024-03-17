@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use base64::prelude::*;
 use leptos::*;
@@ -7,10 +7,10 @@ use lepu::Epub;
 
 use crate::config;
 
-pub type Book = Option<Rc<RefCell<Epub>>>;
+pub type Book = Option<Rc<Epub>>;
 
 pub fn init() {
-    let (book, set_book) = create_signal::<Option<Rc<RefCell<Epub>>>>(None);
+    let (book, set_book) = create_signal::<Option<Rc<Epub>>>(None);
     let (source, set_source) = create_signal(None);
 
     let config = config::get();
@@ -43,7 +43,7 @@ pub fn init() {
         }
         // reset the resource to save some memory
         set_source.set(None);
-        set_book.set(Some(Rc::new(RefCell::new(epub))));
+        set_book.set(Some(Rc::new(epub)));
     });
 
     // load book from local storage
@@ -52,7 +52,7 @@ pub fn init() {
             if let Ok(Some(saved_book)) = storage.get_item("b") {
                 if let Ok(data) = BASE64_STANDARD.decode(saved_book) {
                     let epub = Epub::new(data).ok().unwrap();
-                    set_book.set(Some(Rc::new(RefCell::new(epub))));
+                    set_book.set(Some(Rc::new(epub)));
                 }
             }
         }

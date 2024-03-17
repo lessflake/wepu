@@ -8,11 +8,9 @@ use crate::{
 
 #[component]
 pub fn NavBar(book: ReadSignal<Book>) -> impl IntoView {
-    let (nav_state, set_nav_state) = create_signal(NavState::Upload);
-    provide_context(set_nav_state);
-
     let book_exists = move || matches!(book.get(), Some(_));
     let page = expect_context::<ReadSignal<usize>>();
+    let nav_state = expect_context::<ReadSignal<NavState>>();
 
     view! {
         <nav>
@@ -26,7 +24,7 @@ pub fn NavBar(book: ReadSignal<Book>) -> impl IntoView {
                     <Show when=book_exists fallback=move || view! {
                         <li><span class:underline=move || nav_state.get() == NavState::Upload><A class="hover:text-sky-500" href="">load</A></span></li> }>
                         <li><span class:underline=move || nav_state.get() == NavState::Read><A class="hover:text-sky-500" href={move || format!("{}", page.get())}>read</A></span></li>
-                        <li><span class:underline=move || nav_state.get() == NavState::TableOfContents><A class="hover:text-sky-500" href="">table of contents</A></span></li>
+                        <li><span class:underline=move || nav_state.get() == NavState::Toc><A class="hover:text-sky-500" href="">table of contents</A></span></li>
                     </Show>
                     <li><span class:underline=move || nav_state.get() == NavState::Settings><A class="hover:text-sky-500" href="settings">settings</A></span></li>
                 </ul>

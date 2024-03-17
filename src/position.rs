@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 
 use leptos::*;
-use leptos_router::use_navigate;
 
-use crate::book::Book;
+use crate::{book::Book, config};
 
 pub fn init() {
     // selected page
@@ -19,11 +18,13 @@ pub fn init() {
     // hook: when book changes, load the saved position
     let book = expect_context::<ReadSignal<Book>>();
     create_effect(move |_| {
+        if !config::get().borrow().save_position {
+            return;
+        }
         let Ok(Some(storage)) = leptos::window().local_storage() else {
             return;
         };
         let Some(book) = book.get() else { return };
-        let book = book.borrow();
         let id = book.identifier();
         let Ok(Some(saved_pos)) = storage.get_item(id) else {
             return;
@@ -35,15 +36,5 @@ pub fn init() {
         let para = para.parse::<usize>().unwrap();
         set_page.set(page);
         set_pos.update(|pos| _ = pos.insert(page, para));
-
-        let Ok(Some(route)) = storage.get_item(&format!("{id}-route")) else {
-            return;
-        };
-
-        if route == "content" {
-            create_effect(move |_| {
-                (use_navigate())(&page.to_string(), Default::default());
-            });
-        }
     });
 }

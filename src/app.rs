@@ -4,13 +4,12 @@ use leptos_router::*;
 use crate::{
     book::{self, Book},
     components::{Content, NavBar, Settings, Toc, Upload},
-    config, marks, position,
+    config, marks, nav_state, position,
 };
 
 // local storage usage (non-normative)
 // "b" => base64 encoded epub (most recently loaded book)
 // "{book identifier}" => "{page}:{para}" (current position)
-// "{book identifier}-route" => "nav" | "content" (current route)
 // "c" => "{true|false}:{true|false}" (config fields in order)
 
 fn set_title(title: &str) {
@@ -23,12 +22,9 @@ fn set_title(title: &str) {
 
 #[component]
 pub fn App() -> impl IntoView {
-    create_effect(move |_| {
-        (use_navigate())("", Default::default());
-    });
-
     config::init();
     book::init();
+    nav_state::init();
     position::init();
     marks::init();
 
@@ -36,20 +32,14 @@ pub fn App() -> impl IntoView {
 
     create_effect(move |_| {
         if let Some(book) = book.get() {
-            let epub = book.borrow();
-            set_title(epub.title());
+            set_title(book.title());
         }
     });
 
-    let book_exists = move || matches!(book.get(), Some(_));
-
-    let upload_view = move || {
-        view! { <Upload /> }
-    };
-
+    let book_exists = move || book.get().is_some();
     let main_view = move || {
         view! {
-            <Show when=book_exists fallback=upload_view>
+            <Show when=book_exists fallback=Upload>
                 <Outlet/>
             </Show>
         }

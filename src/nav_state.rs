@@ -4,8 +4,14 @@ use leptos::*;
 pub enum NavState {
     Upload,
     Read,
-    TableOfContents,
+    Toc,
     Settings,
+}
+
+pub fn init() {
+    let (nav_state, set_nav_state) = create_signal(NavState::Upload);
+    provide_context(nav_state);
+    provide_context(set_nav_state);
 }
 
 pub fn set_nav_state(state: NavState) {
