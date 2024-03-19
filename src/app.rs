@@ -4,7 +4,7 @@ use leptos_router::*;
 use crate::{
     book::{self, Book},
     components::{Content, NavBar, Settings, Toc, Upload},
-    config, marks, nav_state, position,
+    config, nav_state, position,
 };
 
 // local storage usage (non-normative)
@@ -26,7 +26,6 @@ pub fn App() -> impl IntoView {
     book::init();
     nav_state::init();
     position::init();
-    marks::init();
 
     let book = expect_context::<ReadSignal<Book>>();
 

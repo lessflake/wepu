@@ -9,12 +9,12 @@ mod components;
 mod config;
 pub use config::Config;
 
-mod input;
+mod content;
 
-mod marks;
-pub use marks::Marks;
+mod input;
 
 mod nav_state;
 pub use nav_state::{set_nav_state, NavState};
 
 mod position;
+pub use position::Marks;
