@@ -24,7 +24,8 @@ pub fn Upload() -> impl IntoView {
             <button on:click:undelegated=on_click
                 class="py-1 px-6 font-sans mb-2 rounded-lg block text-center
                        bg-1 border-dashed border-zinc-600 border-2
-                       aspect-square w-4/12 active:bg-zinc-800">
+                       aspect-square w-4/12 active:border-solid
+                       active:bg-sepia-dark dark:active:bg-zinc-800">
             </button>
             <input
                 on:input=on_submit

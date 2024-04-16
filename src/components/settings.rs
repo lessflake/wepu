@@ -48,7 +48,7 @@ pub fn Settings() -> impl IntoView {
             <input type="checkbox" class="rounded-xs text-sky-500" id="cache-book" checked={config.borrow().cache_book} on:input=cache_book/>
             <span class="ml-2">"Save most recent book between sessions (if book smaller than 3 megabytes)"</span>
         </label>
-            <div><button class="bg-zinc-200 text-zinc-800 mt-2 active:bg-sky-500 active:text-zinc-200 rounded-lg px-3 py-1" on:click=move |_| clear_storage()>Clear data</button></div>
+            <div><button class="bg-sepia-dark text-sepia-light active:text-sepia-light dark:bg-zinc-200 dark:text-zinc-800 mt-2 active:bg-sky-500 dark:active:text-zinc-200 rounded-lg px-3 py-1" on:click=move |_| clear_storage()>Clear data</button></div>
         </div>
     }
 }
